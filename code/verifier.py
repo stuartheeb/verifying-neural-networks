@@ -9,7 +9,7 @@ from DeepPoly import DeepPolySequential, DeepPolyVerifier, DeepPolyLoss, DeepPol
 DEVICE = "cpu"
 
 NUM_EPOCHS = 1000
-LEARNING_RATE = 0.1
+LEARNING_RATE = 10
 
 def analyze(
     net: torch.nn.Module, inputs: torch.Tensor, eps: float, true_label: int
