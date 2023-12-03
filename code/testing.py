@@ -5,6 +5,8 @@ from networks import get_network
 
 from verifier import analyze
 
+import subprocess
+
 DEVICE = "cpu"
 
 """ Please adjust name here """
@@ -58,6 +60,7 @@ total = 0
 exact = 0
 imprecise = 0
 potentially_unsound = 0
+timeout = 0
 
 with open(gt_path, "r") as f:
     test_cases = f.readlines()
@@ -67,17 +70,28 @@ with open(gt_path, "r") as f:
         gt = tc.split(',')[2].rstrip("\n")
 
         print("Test case:", model_name, ',', image_path, ',', gt)
+        result = None
+        #print(model_name)
+        #print(image_path)
 
-        net, image, eps, label = test_case(model_name, image_path)
-        if analyze(net, image, eps, label):
-            result = "verified"
-        else:
-            result = "not verified"
+        #cmd = "python code/verifier.py --net "+model_name+" --spec test_cases/"+model_name+"/"+image_path
+        #print(cmd)
 
-        print("Result:", result)
+        spec = "test_cases/" + model_name + "/" + image_path
+
+        try:
+            r = subprocess.run(["python", "code/verifier.py", "--net", model_name, "--spec", spec], timeout=20, capture_output=True)
+            result = r.stdout.decode("utf-8").strip("\n")
+        except subprocess.TimeoutExpired as e:
+            print("TIMEOUT")
+            result = "timeout"
+
+        print("Result:", result, "\n")
 
         total += 1
-        if result == "verified" and gt == "not verified":
+        if result == "timeout":
+            timeout += 1
+        elif result == "verified" and gt == "not verified":
             potentially_unsound += 1
             print("> POTENTIALLY UNSOUND: verified when ground truth couldn't")
         elif result == "not verified" and gt == "verified":
@@ -92,4 +106,5 @@ with open(gt_path, "r") as f:
 print("Total test cases run:", total)
 print("Exact matches:", exact)
 print("Imprecise:", imprecise)
+print("Timeouts:", timeout)
 print("Potentially unsound:", potentially_unsound)
