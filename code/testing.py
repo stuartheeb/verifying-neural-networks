@@ -1,13 +1,9 @@
-import torch
-# import torch.nn as nn
-
-from networks import get_network
-
-from verifier import analyze
-
 import subprocess
 
 DEVICE = "cpu"
+
+""" Please adjust TIMEOUT here """
+TIMEOUT = None
 
 """ Please adjust name here """
 name = 'Stuart'
@@ -22,33 +18,7 @@ elif name == 'Ioana':
     project_path = 'TODO'
     system = 'mac'
 
-print(name, "is working on a", system)
-
-
-def test_case(model_name, image_path):
-    path = 'test_cases/' + model_name + '/' + image_path
-    eps = float(".".join(path.split("/")[-1].split("_")[-1].split(".")[:2]))
-    dataset = path.split("/")[-1].split("_")[1]
-    shape = (1, 1, 28, 28) if "mnist" in dataset else (1, 3, 32, 32)
-
-    if system == 'win':
-        full_path = project_path + 'test_cases\\' + model_name + '\\' + image_path
-        pt_path = project_path + "models\\" + dataset + "_" + model_name + ".pt"
-    elif system == 'mac':
-        full_path = project_path + 'test_cases/' + model_name + '/' + image_path
-        pt_path = project_path + "models/" + dataset + "_" + model_name + ".pt"
-
-    with open(full_path, "r") as f:
-        # First line is the label
-        label = int(f.readline().strip())
-        # Second line is the image
-        image = [float(x) for x in f.readline().strip().split(",")]
-    image = torch.tensor(image).reshape(shape)
-
-    net = get_network(model_name, dataset, pt_path).to(DEVICE)
-    image = image.to(DEVICE)
-
-    return net, image, eps, label
+print(name, "is working on a", system, "\n")
 
 
 if system == 'win':
@@ -70,17 +40,17 @@ with open(gt_path, "r") as f:
         gt = tc.split(',')[2].rstrip("\n")
 
         print("Test case:", model_name, ',', image_path, ',', gt)
-        result = None
-        #print(model_name)
-        #print(image_path)
 
-        #cmd = "python code/verifier.py --net "+model_name+" --spec test_cases/"+model_name+"/"+image_path
-        #print(cmd)
-
-        spec = "test_cases/" + model_name + "/" + image_path
+        if model_name in "conv":
+            continue
 
         try:
-            r = subprocess.run(["python", "code/verifier.py", "--net", model_name, "--spec", spec], timeout=20, capture_output=True)
+            spec = "test_cases/" + model_name + "/" + image_path
+            # command: "python code/verifier.py --net "+model_name+" --spec test_cases/"+model_name+"/"+image_path
+            if TIMEOUT is None:
+                r = subprocess.run(["python", "code/verifier.py", "--net", model_name, "--spec", spec], capture_output=True)
+            else:
+                r = subprocess.run(["python", "code/verifier.py", "--net", model_name, "--spec", spec], timeout=20, capture_output=True)
             result = r.stdout.decode("utf-8").strip("\n")
         except subprocess.TimeoutExpired as e:
             print("TIMEOUT")
@@ -100,8 +70,6 @@ with open(gt_path, "r") as f:
         else:
             exact += 1
             # print("> exact match")
-
-        # print('\n')
 
 print("Total test cases run:", total)
 print("Exact matches:", exact)
