@@ -4,13 +4,39 @@ import torch
 from networks import get_network
 from utils.loading import parse_spec
 
+from DeepPoly import DeepPolySequential, DeepPolyVerifier, DeepPolyLoss, DeepPolyConstraints
+
 DEVICE = "cpu"
 
+NUM_EPOCHS = 1000
+LEARNING_RATE = 0.1
 
 def analyze(
     net: torch.nn.Module, inputs: torch.Tensor, eps: float, true_label: int
 ) -> bool:
-    return 0
+    dp_sequential = DeepPolySequential(net, inputs)
+    dp_verifier = DeepPolyVerifier(true_label)
+    dp_loss = DeepPolyLoss()
+    dp_constraints = DeepPolyConstraints.constraints_from_eps(inputs, eps, clipper=(0.0, 1.0))
+
+    if len(list(dp_sequential.parameters())) == 0:
+        verification = dp_verifier(dp_sequential(dp_constraints))
+        if (verification.lbounds > 0.0).all():
+            return True
+        else:
+            return False
+
+    optimizer = torch.optim.Adam(dp_sequential.parameters(), lr=LEARNING_RATE)
+    for _ in range(NUM_EPOCHS):
+        optimizer.zero_grad()
+        verification = dp_verifier(dp_sequential(dp_constraints))
+        if (verification.lbounds > 0.0).all():
+            return True
+        loss = dp_loss(verification)
+        loss.backward()
+        optimizer.step()
+
+    return False
 
 
 def main():
@@ -47,8 +73,8 @@ def main():
 
     net = get_network(args.net, dataset, f"models/{dataset}_{args.net}.pt").to(DEVICE)
 
-    image = image.to(DEVICE)
-    out = net(image.unsqueeze(0))
+    image = image.to(DEVICE).unsqueeze(0)
+    out = net(image)
 
     pred_label = out.max(dim=1)[1].item()
     assert pred_label == true_label
