@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-torch.set_default_dtype(torch.float64)
+torch.set_default_dtype(torch.float32)
 
 def get_flattened_shape(input_shape):
     flattened_input_shape = 1
@@ -9,18 +9,17 @@ def get_flattened_shape(input_shape):
         flattened_input_shape *= input_shape[dim]
     return flattened_input_shape
 
-
 class DeepPolyConstraints:
     def __init__(self, lbounds, ubounds):
         self.lbounds = lbounds
         self.ubounds = ubounds
         self.previous = None
         self.transformer = None
-
+    
     @classmethod
     def constraints_from_eps(cls, inputs, eps, clipper):
-        return cls((inputs - eps).clamp(*clipper), (inputs + eps).clamp(*clipper))
-
+        return cls((inputs-eps).clamp(*clipper), (inputs+eps).clamp(*clipper))
+    
     @classmethod
     def constraints_from_transformer(cls, previous, lslope, lintercept, uslope, uintercept):
         self = cls.__new__(cls)
@@ -28,6 +27,15 @@ class DeepPolyConstraints:
         self.ubounds = None
         self.previous = previous
         self.transformer = (lslope, lintercept, uslope, uintercept)
+        return self
+
+    @classmethod
+    def constraints_from_flatten(cls, previous, lbounds, ubounds):
+        self = cls.__new__(cls)
+        self.lbounds = lbounds
+        self.ubounds = ubounds
+        self.previous = previous
+        self.transformer = "flatten"
         return self
 
     def certifier(self, lslope, lintercept, uslope, uintercept, initial_bounds):
@@ -42,12 +50,16 @@ class DeepPolyConstraints:
     def backsubstitution(self):
         if self.lbounds is not None and self.ubounds is not None:
             return
-
+        
         current = self
         clslope, clintercept, cuslope, cuintercept = current.transformer
         current = current.previous
 
         while current.transformer is not None:
+            if current.transformer == "flatten":
+                current = current.previous 
+                continue
+            
             plslope, plintercept, puslope, puintercept = current.transformer
 
             clslope_pos = torch.where(clslope > 0, clslope, torch.zeros_like(clslope))
@@ -59,12 +71,11 @@ class DeepPolyConstraints:
             cuintercept = puintercept @ cuslope_pos.T + plintercept @ cuslope_neg.T + cuintercept
             clslope = clslope_pos @ plslope + clslope_neg @ puslope
             cuslope = cuslope_pos @ puslope + cuslope_neg @ plslope
-
+            
             current = current.previous
 
         self.certifier(clslope, clintercept, cuslope, cuintercept, current)
-
-
+        
 class DeepPolyLinearLayer(nn.Module):
     def __init__(self, layer):
         super().__init__()
@@ -74,18 +85,21 @@ class DeepPolyLinearLayer(nn.Module):
     def forward(self, previous):
         return DeepPolyConstraints.constraints_from_transformer(previous, self.W, self.b, self.W, self.b)
 
-
 class DeepPolyFlattenLayer(nn.Module):
-    def __init__(self, layer):
+    def __init__(self, layer, is_first = False):
         super().__init__()
         self.flatten = layer
+        self.is_first = is_first
 
     def forward(self, previous):
         previous.backsubstitution()
-        lbounds = self.flatten(previous.lbounds)
-        ubounds = self.flatten(previous.ubounds)
-        return DeepPolyConstraints(lbounds, ubounds)
+        lbounds = previous.lbounds.flatten()
+        ubounds = previous.ubounds.flatten()
 
+        if self.is_first:
+            return DeepPolyConstraints(lbounds, ubounds)
+            
+        return DeepPolyConstraints.constraints_from_flatten(previous, lbounds, ubounds)
 
 class DeepPolyConv2D(nn.Module):
     def __init__(self, layer, input_shape):
@@ -103,8 +117,7 @@ class DeepPolyConv2D(nn.Module):
         flattened_input_shape = input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3]
 
         W = torch.eye(flattened_input_shape).view(list(input_shape) + [flattened_input_shape]).permute(0, 1, 4, 2, 3)
-        W = nn.functional.conv3d(W, kernel.unsqueeze(2), stride=tuple([1] + list(stride)),
-                                 padding=tuple([0] + list(padding))).permute(0, 1, 3, 4, 2)
+        W = nn.functional.conv3d(W, kernel.unsqueeze(2), stride=tuple([1] + list(stride)), padding=tuple([0] + list(padding))).permute(0, 1, 3, 4, 2)
         b = torch.ones(W.shape[:-1])
         b = b * bias[:, None, None]
 
@@ -112,7 +125,6 @@ class DeepPolyConv2D(nn.Module):
         b = torch.flatten(b)
 
         return DeepPolyConstraints.constraints_from_transformer(previous, W, b, W, b)
-
 
 class DeepPolyReLU(nn.Module):
     def __init__(self, layer, input_shape):
@@ -126,9 +138,7 @@ class DeepPolyReLU(nn.Module):
         previous.backsubstitution()
         lbounds = previous.lbounds
         ubounds = previous.ubounds
-        _, N = lbounds.shape
-
-        assert N == self.flattened_input_shape
+        N = self.flattened_input_shape
 
         relu_slope = (ubounds / (ubounds - lbounds)).flatten()
         relu_slope[relu_slope != relu_slope] = 0
@@ -144,7 +154,7 @@ class DeepPolyReLU(nn.Module):
         lslope = torch.where(above_nodes, torch.ones(N), lslope)
         uslope = torch.where(above_nodes, torch.ones(N), uslope)
 
-        # Case 3: crossing ReLUs (relaxation I from lecture notes)
+        # Case 3: crossing ReLUs
         crossing_nodes = ~(below_nodes | above_nodes)
 
         uslope = torch.where(crossing_nodes, relu_slope, uslope)
@@ -154,14 +164,13 @@ class DeepPolyReLU(nn.Module):
         # V2
         lslope_v2 = torch.where(crossing_nodes, torch.ones(N), lslope)
 
-        lslope = alpha * lslope_v1 + (1 - alpha) * lslope_v2
+        lslope = alpha*lslope_v1 + (1-alpha)*lslope_v2
 
         lslope = torch.diag(lslope)
         uslope = torch.diag(uslope)
 
         return DeepPolyConstraints.constraints_from_transformer(previous, lslope, lintercept, uslope, uintercept)
-
-
+    
 class DeepPolyLeakyReLU(nn.Module):
     def __init__(self, layer, input_shape):
         super().__init__()
@@ -176,9 +185,9 @@ class DeepPolyLeakyReLU(nn.Module):
         previous.backsubstitution()
         lbounds = previous.lbounds
         ubounds = previous.ubounds
-        _, N = lbounds.shape
+        N = self.flattened_input_shape
 
-        leaky_relu_slope = ((ubounds - lbounds * neg_slope) / (ubounds - lbounds)).flatten()
+        leaky_relu_slope = ((ubounds - lbounds*neg_slope) / (ubounds - lbounds)).flatten()
         leaky_relu_slope[leaky_relu_slope != leaky_relu_slope] = 0
         leaky_relu_intercept = (1 - leaky_relu_slope) * ubounds
 
@@ -202,13 +211,13 @@ class DeepPolyLeakyReLU(nn.Module):
         if neg_slope <= 1:
             uslope = torch.where(crossing_nodes, leaky_relu_slope, uslope)
             uintercept = torch.where(crossing_nodes, leaky_relu_intercept, uintercept)
-
+            
             # V1
             lslope_v1 = torch.where(crossing_nodes, torch.ones(N), lslope)
             # V2
-            lslope_v2 = torch.where(crossing_nodes, neg_slope * torch.ones(N), lslope)
+            lslope_v2 = torch.where(crossing_nodes, neg_slope*torch.ones(N), lslope)
 
-            lslope = alpha * lslope_v1 + (1 - alpha) * lslope_v2
+            lslope = alpha*lslope_v1 + (1-alpha)*lslope_v2
 
         elif neg_slope > 1:
             lslope = torch.where(crossing_nodes, leaky_relu_slope, lslope)
@@ -217,15 +226,14 @@ class DeepPolyLeakyReLU(nn.Module):
             # V1
             uslope_v1 = torch.where(crossing_nodes, torch.ones(N), uslope)
             # V2
-            uslope_v2 = torch.where(crossing_nodes, neg_slope * torch.ones(N), uslope)
+            uslope_v2 = torch.where(crossing_nodes, neg_slope*torch.ones(N), uslope)
 
-            uslope = alpha * uslope_v1 + (1 - alpha) * uslope_v2
+            uslope = alpha*uslope_v1 + (1-alpha)*uslope_v2
 
         lslope = torch.diag(lslope)
         uslope = torch.diag(uslope)
 
         return DeepPolyConstraints.constraints_from_transformer(previous, lslope, lintercept, uslope, uintercept)
-
 
 class DeepPolySequential(nn.Sequential):
     def __init__(self, network, inputs):
@@ -240,13 +248,13 @@ class DeepPolySequential(nn.Sequential):
                 return DeepPolyLeakyReLU(layer, input_shape)
             elif isinstance(layer, nn.Flatten):
                 return DeepPolyFlattenLayer(layer)
-            elif isinstance(layer, nn.Sequential):  # check if this is needed
-                return DeepPolySequential(layer)
+            elif isinstance(layer, nn.Sequential): # check if this is needed
+                return DeepPolySequential(layer, inputs)
             else:
                 raise NotImplementedError(f"No DP layer for layer {layer}")
 
         current = inputs
-        layers = [DeepPolyFlattenLayer(nn.Flatten())]
+        layers = [DeepPolyFlattenLayer(nn.Flatten, is_first = True)]
         for child in network.children():
             layers.append(get_dp_layer(child, current.shape))
             current = child(current)
@@ -255,7 +263,7 @@ class DeepPolySequential(nn.Sequential):
 
 
 class DeepPolyVerifier(nn.Module):
-    def __init__(self, true_label, num_labels=10):
+    def __init__(self, true_label, num_labels = 10):
         super().__init__()
         W = -torch.eye(num_labels)
         W = W[torch.arange(num_labels) != true_label, :]
@@ -267,7 +275,6 @@ class DeepPolyVerifier(nn.Module):
         out_shape = DeepPolyConstraints.constraints_from_transformer(previous, self.W, self.b, self.W, self.b)
         out_shape.backsubstitution()
         return out_shape
-
 
 class DeepPolyLoss(nn.Module):
     def forward(self, previous):
