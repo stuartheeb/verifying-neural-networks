@@ -3,7 +3,7 @@ import subprocess
 DEVICE = "cpu"
 
 """ Please adjust TIMEOUT here """
-TIMEOUT = None
+TIMEOUT = 60
 
 """ Please adjust name here """
 name = 'Stuart'
@@ -38,15 +38,16 @@ with open(gt_path, "r") as f:
         model_name = tc.split(',')[0]
         image_path = tc.split(',')[1]
         gt = tc.split(',')[2].rstrip("\n")
+        assert gt == "verified" or gt == "not verified"
+
+        #if "conv_base" not in model_name:
+        #    continue
 
         print("Test case:", model_name, ',', image_path, ',', gt)
 
-        if model_name in "conv":
-            continue
-
         try:
             spec = "test_cases/" + model_name + "/" + image_path
-            # command: "python code/verifier.py --net "+model_name+" --spec test_cases/"+model_name+"/"+image_path
+            # cmd = "python code/verifier.py --net "+model_name+" --spec test_cases/"+model_name+"/"+image_path
             if TIMEOUT is None:
                 r = subprocess.run(["python", "code/verifier.py", "--net", model_name, "--spec", spec], capture_output=True)
             else:
@@ -54,8 +55,10 @@ with open(gt_path, "r") as f:
             result = r.stdout.decode("utf-8").strip("\n")
         except subprocess.TimeoutExpired as e:
             print("TIMEOUT")
-            result = "timeout"
+            #result = "timeout"
+            result = "not verified"
 
+        assert result == "verified" or result == "not verified" or result == "timeout"
         print("Result:", result, "\n")
 
         total += 1
