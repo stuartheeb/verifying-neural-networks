@@ -8,11 +8,11 @@ from DeepPoly import DeepPolySequential, DeepPolyVerifier, DeepPolyLoss, DeepPol
 
 DEVICE = "cpu"
 
-NUM_EPOCHS = 1000
-LEARNING_RATE = 10
+LEARNING_RATE = 3
+
 
 def analyze(
-    net: torch.nn.Module, inputs: torch.Tensor, eps: float, true_label: int
+        net: torch.nn.Module, inputs: torch.Tensor, eps: float, true_label: int
 ) -> bool:
     dp_sequential = DeepPolySequential(net, inputs)
     dp_verifier = DeepPolyVerifier(true_label)
@@ -26,8 +26,8 @@ def analyze(
         else:
             return False
 
-    optimizer = torch.optim.Adam(dp_sequential.parameters(), lr=LEARNING_RATE)
-    for _ in range(NUM_EPOCHS):
+    optimizer = torch.optim.AdamW(dp_sequential.parameters(), lr=LEARNING_RATE)
+    while True:
         optimizer.zero_grad()
         verification = dp_verifier(dp_sequential(dp_constraints))
         if (verification.lbounds > 0.0).all():
