@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 
 torch.set_default_dtype(torch.float32)
+torch.manual_seed(32)
 
 
 def get_flattened_shape(input_shape):
@@ -119,7 +120,7 @@ class DeepPolyConv2D(nn.Module):
         kernel, bias = self.W, self.b
         stride, padding = self.stride, self.padding
         input_shape = self.input_shape
-        flattened_input_shape = input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3]
+        flattened_input_shape = get_flattened_shape(input_shape)
 
         W = torch.eye(flattened_input_shape).view(list(input_shape) + [flattened_input_shape]).permute(0, 1, 4, 2, 3)
         W = nn.functional.conv3d(W, kernel.unsqueeze(2), stride=tuple([1] + list(stride)),
@@ -141,7 +142,7 @@ class DeepPolyLeakyReLU(nn.Module):
         else:
             self.negative_slope = layer.negative_slope
         self.flattened_input_shape = get_flattened_shape(input_shape)
-        self.raw_alpha = nn.Parameter(data=torch.ones(self.flattened_input_shape), requires_grad=True)
+        self.raw_alpha = nn.Parameter(data=torch.zeros(self.flattened_input_shape), requires_grad=True)
 
     def forward(self, previous):
         alpha = torch.sigmoid(self.raw_alpha)
@@ -246,4 +247,4 @@ class DeepPolyVerifier(nn.Module):
 class DeepPolyLoss(nn.Module):
     def forward(self, previous):
         lbounds = previous.lbounds
-        return torch.log(-lbounds[lbounds < 0]).max()
+        return torch.log(-lbounds[lbounds < 0]).mean()
