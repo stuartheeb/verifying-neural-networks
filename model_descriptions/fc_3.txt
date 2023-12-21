@@ -1,0 +1,8 @@
+Sequential(
+  (0): Flatten(start_dim=1, end_dim=-1)
+  (1): Linear(in_features=784, out_features=100, bias=True)
+  (2): LeakyReLU(negative_slope=0.5)
+  (3): Linear(in_features=100, out_features=100, bias=True)
+  (4): LeakyReLU(negative_slope=0.5)
+  (5): Linear(in_features=100, out_features=10, bias=True)
+)
