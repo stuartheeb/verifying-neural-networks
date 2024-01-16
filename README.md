@@ -1,4 +1,4 @@
-# Certifying Neural Networks
+# Verifying Neural Networks
 
 This project is a verifier for neural networks. It can verify for (currently only a limit set of architectures) whether an input image perturbed by an epsilon will still produce the correct initial label. The architectures support the following layer:
 - Flatten
