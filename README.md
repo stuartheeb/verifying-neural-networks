@@ -11,4 +11,4 @@ The transformers are based on the [DeepPoly paper](https://dl.acm.org/doi/10.114
 
 ## Authors
 
-This project was part of the course [Reliable and Trustworthy Artificial Intelligence](https://www.vvz.ethz.ch/Vorlesungsverzeichnis/lerneinheit.view?lang=en&semkez=2023W&ansicht=ALLE&lerneinheitId=172754&) at ETH Zürich and was completed with Angéline Pouget and Ioana Branescu-Raspop.
+This project was part of the course [Reliable and Trustworthy Artificial Intelligence](https://www.vvz.ethz.ch/Vorlesungsverzeichnis/lerneinheit.view?lang=en&semkez=2023W&ansicht=ALLE&lerneinheitId=172754&) at ETH Zürich and was completed with [Angéline Pouget](https://github.com/angelinepouget) and [Ioana Branescu-Raspop](mailto:ibranescu@student.ethz.ch).
